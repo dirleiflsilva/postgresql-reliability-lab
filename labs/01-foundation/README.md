@@ -58,19 +58,42 @@ O serviço deve ficar com status `healthy` após a inicialização.
 
 ## Como conectar via psql
 
+Use sempre os valores definidos no arquivo `.env`, principalmente a senha configurada em `POSTGRES_PASSWORD`.
+
 Via cliente `psql` no host:
 
 ```bash
-psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
+psql "postgresql://SEU_USUARIO:SUA_SENHA@localhost:SUA_PORTA/SEU_BANCO"
 ```
 
 Via container:
 
 ```bash
+docker compose exec postgres psql -U "SEU_USUARIO" -d "SEU_BANCO"
+```
+
+Exemplo com os valores padrão do `.env.example`:
+
+```bash
+psql "postgresql://app_user:app1010@localhost:5432/app"
+docker compose exec postgres psql -U "app_user" -d "app"
+```
+
+Esta e a forma recomendada para a validação do lab, porque deixa explícito quais valores estão sendo usados.
+
+Também é possível usar variáveis no terminal, desde que elas estejam exportadas no shell do host:
+
+```bash
+export POSTGRES_USER=app_user
+export POSTGRES_PASSWORD=app1010
+export POSTGRES_PORT=5432
+export POSTGRES_DB=app
+
+psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
 docker compose exec postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"
 ```
 
-Se preferir evitar expansão de variáveis no shell, substitua os valores manualmente pelos definidos no `.env`.
+Sem esse `export`, `${POSTGRES_USER}` e `${POSTGRES_DB}` serão expandidas pelo shell do host antes do comando rodar e podem ficar vazias, mesmo que o `.env` exista no diretório do lab.
 
 ## Como validar o funcionamento
 
@@ -90,7 +113,7 @@ ok: PostgreSQL operacional e tabela users acessível.
 Também é possível validar manualmente:
 
 ```bash
-docker compose exec postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "TABLE users;"
+docker compose exec postgres psql -U "SEU_USUARIO" -d "SEU_BANCO" -c "TABLE users;"
 ```
 
 ## Inicialização do banco
@@ -119,3 +142,9 @@ O valor padrão em `.env.example` define `POSTGRES_DB=app`, então o banco `app`
 docker compose down -v
 docker compose up -d
 ```
+
+## Referências
+
+- `pg_isready`: utilitário oficial do PostgreSQL para verificar se o servidor está aceitando conexões. Documentação: https://www.postgresql.org/docs/current/app-pg-isready.html
+- `/docker-entrypoint-initdb.d`: diretório suportado pela imagem oficial `postgres` para executar scripts de inicialização no primeiro bootstrap do volume. Documentação: https://hub.docker.com/_/postgres
+- Guia adicional da Docker sobre inicialização automática com scripts: https://docs.docker.com/guides/postgresql/advanced-configuration-and-initialization/

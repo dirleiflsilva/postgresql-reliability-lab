@@ -11,7 +11,7 @@ Laboratórios práticos de engenharia do PostgreSQL, orientados à produção, c
 
 ## Laboratórios
 
-- [ ] 01 - Fundamentos (nó único)
+- [x] 01 - Fundamentos (nó único)
 - [ ] 02 - Backup e Restauração
 - [ ] 03 - Replicação
 - [ ] 04 - Failover
@@ -50,7 +50,7 @@ Cada lab é independente, mas segue uma evolução natural de complexidade:
 
 | Status | Lab | Descrição |
 |--------|-----|----------|
-| 🚧 | 01 - Foundation | Ambiente PostgreSQL single-node com boas práticas |
+| ✅ | 01 - Foundation | Ambiente PostgreSQL single-node com boas práticas |
 | ⏳ | 02 - Backup & Restore | Estratégias de backup lógico e físico + recuperação |
 | ⏳ | 03 - Replication | Replicação streaming (primary + replica) |
 | ⏳ | 04 - Failover | Cluster com failover automático |
