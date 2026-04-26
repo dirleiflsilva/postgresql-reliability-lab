@@ -56,6 +56,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.code-workspace
+.codex
 
 # =========================
 # Python (se usar ETL)
