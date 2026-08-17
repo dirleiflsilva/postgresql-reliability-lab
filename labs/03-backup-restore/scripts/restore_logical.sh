@@ -49,7 +49,7 @@ BEGIN
   );
 
   IF missing_roles IS NOT NULL THEN
-    RAISE EXCEPTION 'roles globais ausentes: %. Execute init/01_roles.sql antes do restore', missing_roles;
+    RAISE EXCEPTION 'roles globais ausentes: %. Execute init/01_roles.sh antes do restore', missing_roles;
   END IF;
 END
 $roles$;

@@ -53,7 +53,9 @@ sync -f "${TEMP_FILE}"
 if ln -- "${TEMP_FILE}" "${DEST_FILE}" 2>/dev/null; then
   rm -f -- "${TEMP_FILE}"
   trap - EXIT
-  sync -f "${ARCHIVE_DIR}"
+  # syncfs pelo arquivo final também persiste a entrada do diretório, sem exigir
+  # permissão de listagem no diretório 1733.
+  sync -f "${DEST_FILE}"
   exit 0
 fi
 

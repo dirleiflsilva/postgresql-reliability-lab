@@ -27,13 +27,13 @@ require_running_postgres() {
   fi
 }
 
-# O processo do PostgreSQL dentro do container roda como o usuário "postgres"
-# (uid 999), diferente do usuário do host que criou o diretório via bind
-# mount. Por isso os diretórios usados para backup/WAL archive precisam ficar
-# graváveis por qualquer uid.
+# Bind mounts podem atravessar user namespaces e apresentar UIDs diferentes no
+# host e no container. O modo 1733 mantém listagem/leitura restrita ao dono do
+# diretório, permite escrita ao postgres e usa sticky bit para impedir que um
+# terceiro uid remova arquivos que não lhe pertencem.
 ensure_writable_dir() {
-  mkdir -p "$1"
-  chmod 777 "$1"
+  mkdir -p -- "$1"
+  chmod 1733 "$1"
 }
 
 validate_compose_database() {

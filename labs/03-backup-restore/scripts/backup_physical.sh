@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Gera um backup físico (base backup) via pg_basebackup, usando backup_user
-# (role criada em init/01_roles.sql com atributo REPLICATION).
+# (role criada em init/01_roles.sh com atributo REPLICATION).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

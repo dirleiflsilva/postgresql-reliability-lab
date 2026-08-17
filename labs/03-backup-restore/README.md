@@ -28,6 +28,7 @@ labs/03-backup-restore/
 │   ├── backup_physical.sh      # pg_basebackup via backup_user
 │   ├── restore_physical.sh     # sobe um container temporário a partir do backup físico
 │   ├── pitr_demo.sh            # roteiro completo de incidente + PITR
+│   ├── test_repetition.sh       # teste destrutivo de repetição end-to-end
 │   ├── validate_restored_db.sql # valida estrutura, sentinelas e integridade interna
 │   └── orders_fingerprint.sql   # fingerprint determinístico de pedidos, itens e pagamentos
 ├── backups/
@@ -39,7 +40,7 @@ labs/03-backup-restore/
 
 ## Scripts de inicialização
 
-Os scripts em `init/` são os mesmos do Lab 02 (roles, extensões, schemas, tabelas, procedure de seed e carga de dados) e rodam automaticamente na primeira inicialização do volume. Consulte o [README do Lab 02](../02-database-initialization/README.md) para o detalhamento de cada arquivo.
+Os scripts em `init/` evoluem os do Lab 02 e rodam automaticamente apenas na primeira inicialização do volume. A principal diferença é `01_roles.sh`: ele lê `BACKUP_USER_PASSWORD` do ambiente e define a senha de `backup_user` sem mantê-la fixa no repositório. Os demais arquivos preservam extensões, schemas, tabelas, procedure de seed e carga de dados do Lab 02.
 
 ## Como subir o ambiente
 
@@ -55,14 +56,16 @@ cd labs/03-backup-restore
 cp .env.example .env
 ```
 
-3. Ajuste `POSTGRES_PASSWORD` e `BACKUP_USER_PASSWORD` no `.env` antes de subir o ambiente (devem coincidir com as senhas definidas em `init/01_roles.sql`, que são apenas para uso local do lab).
+3. Ajuste `POSTGRES_PASSWORD` e `BACKUP_USER_PASSWORD` no `.env` antes de subir o ambiente. `POSTGRES_PASSWORD` é consumida pela imagem Docker para criar o superusuário definido em `POSTGRES_USER`; `BACKUP_USER_PASSWORD` é consumida por `init/01_roles.sh` para configurar `backup_user` e depois pelos scripts que executam `pg_basebackup`. Scripts SQL não interpolam variáveis do `.env` automaticamente.
 
-4. Crie os diretórios de backup/WAL archive com permissão de escrita para qualquer usuário. Isso é necessário porque o PostgreSQL dentro do container roda como o usuário `postgres` (uid 999), diferente do usuário do host que cria os diretórios via bind mount:
+4. Crie os diretórios de backup/WAL archive com modo `1733`. Em bind mounts, o PostgreSQL pode aparecer com UID diferente no host; esse modo permite a escrita sem liberar listagem/leitura e o sticky bit impede que outro UID remova arquivos que não lhe pertencem:
 
 ```bash
 mkdir -p wal_archive backups/logical backups/physical
-chmod 777 wal_archive backups/logical backups/physical
+chmod 1733 wal_archive backups/logical backups/physical
 ```
+
+Essa permissão é uma solução de compatibilidade exclusiva para o lab local. Em produção, use storage dedicado com proprietário/grupo controlados e permissões `0700` ou equivalentes.
 
 5. Inicie o PostgreSQL:
 
@@ -101,7 +104,7 @@ Além do estado base (roles, schemas, extensões, dados e configuração), o scr
 ```
 
 - `backup_logical.sh` gera `backups/logical/appdb_<timestamp>.dump` com `pg_dump -Fc`; o nome final só é publicado depois que o comando termina com sucesso. Por definição, esse dump contém apenas o banco `appdb`: roles e tablespaces são objetos globais do cluster e ficam fora do escopo deste lab.
-- `restore_logical.sh` exige que as roles criadas por `init/01_roles.sql` já existam, valida o catálogo com `pg_restore --list`, cria `appdb_restore` a partir de `template0` e restaura o dump preservando os proprietários originais. Depois verifica ownership, privilégios, estrutura, constraints, índices, dados sentinela e consistência dos totais. Contagens e fingerprints do banco atual são mostrados apenas como comparação informativa, pois o banco pode ter avançado desde o snapshot.
+- `restore_logical.sh` exige que as roles criadas por `init/01_roles.sh` já existam, valida o catálogo com `pg_restore --list`, cria `appdb_restore` a partir de `template0` e restaura o dump preservando os proprietários originais. Depois verifica ownership, privilégios, estrutura, constraints, índices, dados sentinela e consistência dos totais. Contagens e fingerprints do banco atual são mostrados apenas como comparação informativa, pois o banco pode ter avançado desde o snapshot.
 
 Para migrar o backup para um cluster vazio, as roles devem ser criadas primeiro pelo script de inicialização. Em uma estratégia de backup completo de cluster, os objetos globais seriam protegidos separadamente com `pg_dumpall --globals-only`.
 
@@ -112,7 +115,7 @@ Para migrar o backup para um cluster vazio, as roles devem ser criadas primeiro 
 ./scripts/restore_physical.sh
 ```
 
-- `backup_physical.sh` usa `pg_basebackup` autenticado como `backup_user` (role criada em `init/01_roles.sql` com o atributo `REPLICATION`) e grava o resultado em `backups/physical/<timestamp>/`. Durante a execução, o diretório usa o sufixo `.partial` e só recebe o nome final após sucesso.
+- `backup_physical.sh` usa `pg_basebackup` autenticado como `backup_user` (role criada em `init/01_roles.sh` com o atributo `REPLICATION`) e grava o resultado em `backups/physical/<timestamp>/`. Durante a execução, o diretório usa o sufixo `.partial` e só recebe o nome final após sucesso.
 - `restore_physical.sh` copia o backup físico mais recente (ou um timestamp específico passado como argumento) para uma área isolada, sobe um container Postgres temporário na porta `VERIFY_PHYSICAL_PORT` (padrão `5435`) e valida estrutura, constraints, índices, sentinelas, totais internos e fingerprint dos pedidos. O container temporário é removido automaticamente ao final.
 
 ## WAL archiving e PITR
@@ -155,12 +158,26 @@ Esse script automatiza o cenário completo:
 >   -v "$PWD/backups:/backups" \
 >   postgres:16 bash -c \
 >   'find /wal_archive /backups/logical /backups/physical -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
+> chmod 1733 wal_archive backups/logical backups/physical
 > docker compose up -d
 > ```
 >
 > A limpeza de `wal_archive/` é obrigatória ao criar um cluster novo: WALs de
 > clusters diferentes não podem compartilhar o mesmo archive. O comando acima
 > também remove os backups vinculados ao cluster descartado.
+
+## Teste destrutivo de repetição
+
+O roteiro automatizado abaixo recria o volume, limpa backups/WALs, executa dois
+ciclos de PITR separados por reset e comprova que artefatos `.partial` e um
+timestamp inválido não são aceitos como backups:
+
+```bash
+./scripts/test_repetition.sh --destructive
+```
+
+> **Atenção:** esse teste é deliberadamente destrutivo para o ambiente do Lab 03.
+> A flag `--destructive` é obrigatória para evitar execução acidental.
 
 ## Como conectar via psql
 
@@ -186,6 +203,7 @@ psql "postgresql://postgres:SUA_SENHA@localhost:5434/appdb"
 ## Observações
 
 - `backups/` e `wal_archive/` são ignorados pelo Git (dados binários, gerados localmente).
+- O conteúdo de WAL é sensível e os arquivos são publicados com modo `0600`; o modo `1733` aplica-se somente aos diretórios de bind mount para compatibilidade entre UIDs no host e no container.
 - Os diretórios `backups/physical/<timestamp>-verify/` e `backups/physical/<timestamp>-pitr/` são cópias de trabalho criadas pelos scripts de restore/PITR; podem ser removidos livremente.
 - As senhas definidas nos scripts de `init/` são apenas para uso local do lab. Em um ambiente real, backup e restore devem usar segredos gerenciados e, idealmente, ferramentas dedicadas como `pgBackRest` ou `Barman` — fora do escopo deste lab, que foca nos mecanismos nativos do PostgreSQL.
 
