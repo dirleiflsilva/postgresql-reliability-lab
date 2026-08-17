@@ -21,13 +21,14 @@ services:
         "-c",
         "archive_mode=on",
         "-c",
-        "archive_command=test ! -f /var/lib/postgresql/wal_archive/%f && cp %p /var/lib/postgresql/wal_archive/%f",
+        "archive_command=/usr/local/bin/archive_wal %p %f",
       ]
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
       - postgres_backup_restore_data:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d:ro
+      - ./scripts/archive_wal.sh:/usr/local/bin/archive_wal:ro
       - ./wal_archive:/var/lib/postgresql/wal_archive
       - ./backups:/backups
     healthcheck:

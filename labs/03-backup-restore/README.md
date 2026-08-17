@@ -21,6 +21,7 @@ labs/03-backup-restore/
 ├── init/                     # roles, extensões, schemas, tabelas e carga (mesmo do Lab 02)
 ├── scripts/
 │   ├── _common.sh            # helper compartilhado (não executar diretamente)
+│   ├── archive_wal.sh         # archive_command seguro contra colisões e reenvios
 │   ├── check.sh               # valida o estado base do ambiente
 │   ├── backup_logical.sh       # pg_dump -Fc
 │   ├── restore_logical.sh      # pg_restore em banco separado + comparação de linhas
@@ -97,7 +98,7 @@ Esse script valida apenas o estado base do ambiente (roles, schemas, extensões,
 ./scripts/restore_logical.sh
 ```
 
-- `backup_logical.sh` gera `backups/logical/appdb_<timestamp>.dump` com `pg_dump -Fc`.
+- `backup_logical.sh` gera `backups/logical/appdb_<timestamp>.dump` com `pg_dump -Fc`; o nome final só é publicado depois que o comando termina com sucesso.
 - `restore_logical.sh` restaura o dump mais recente (ou um arquivo específico passado como argumento) em um banco `appdb_restore`, e compara a contagem de linhas de cada tabela contra o banco de origem.
 
 ## Backup e restore físico
@@ -107,7 +108,7 @@ Esse script valida apenas o estado base do ambiente (roles, schemas, extensões,
 ./scripts/restore_physical.sh
 ```
 
-- `backup_physical.sh` usa `pg_basebackup` autenticado como `backup_user` (role criada em `init/01_roles.sql` com o atributo `REPLICATION`) e grava o resultado em `backups/physical/<timestamp>/`.
+- `backup_physical.sh` usa `pg_basebackup` autenticado como `backup_user` (role criada em `init/01_roles.sql` com o atributo `REPLICATION`) e grava o resultado em `backups/physical/<timestamp>/`. Durante a execução, o diretório usa o sufixo `.partial` e só recebe o nome final após sucesso.
 - `restore_physical.sh` copia o backup físico mais recente (ou um timestamp específico passado como argumento) para uma área isolada, sobe um container Postgres temporário a partir dela na porta `VERIFY_PHYSICAL_PORT` (padrão `5435`) e valida que os dados batem com o esperado. O container temporário é removido automaticamente ao final.
 
 ## WAL archiving e PITR
@@ -116,9 +117,12 @@ O `docker-compose.yml` inicia o PostgreSQL com:
 
 - `wal_level=replica`
 - `archive_mode=on`
-- `archive_command=cp %p /var/lib/postgresql/wal_archive/%f` (idempotente, não sobrescreve um arquivo já arquivado)
+- `archive_command=/usr/local/bin/archive_wal %p %f`
 
 Os WALs arquivados ficam disponíveis no host em `wal_archive/`, montado como volume no container.
+O helper `archive_wal.sh` publica cada arquivo de forma atômica, aceita como sucesso
+um reenvio com conteúdo idêntico e recusa sobrescrever um arquivo de mesmo nome
+com conteúdo diferente.
 
 ### Roteiro guiado de incidente + PITR
 
@@ -131,7 +135,7 @@ Esse script automatiza o cenário completo:
 1. Confirma que `archive_mode` está ativo.
 2. Gera um backup físico de base (`pg_basebackup`).
 3. Registra um timestamp de referência e aguarda alguns segundos.
-4. **Simula um incidente**: apaga os dados de `app.payments`, `app.order_items` e `app.orders` no ambiente principal do lab, e força um `pg_switch_wal()` para garantir que o WAL do incidente seja arquivado.
+4. **Simula um incidente**: apaga, em uma única transação, os dados de `app.payments`, `app.order_items` e `app.orders` no ambiente principal do lab, força um `pg_switch_wal()` e aguarda o `pg_stat_archiver` confirmar o arquivamento do WAL do incidente.
 5. Copia o backup de base para uma área isolada, configura `recovery_target_time` com o timestamp do passo 3 e `restore_command` apontando para `wal_archive/`.
 6. Sobe um container temporário na porta `VERIFY_PITR_PORT` (padrão `5436`), aguarda o replay de WAL e a promoção do cluster restaurado.
 7. Compara a contagem de `app.orders` antes do incidente, depois do incidente (no ambiente principal, que permanece com os dados apagados) e no cluster restaurado via PITR.
@@ -142,8 +146,17 @@ Esse script automatiza o cenário completo:
 >
 > ```bash
 > docker compose down -v
+> docker run --rm --user root \
+>   -v "$PWD/wal_archive:/wal_archive" \
+>   -v "$PWD/backups:/backups" \
+>   postgres:16 bash -c \
+>   'find /wal_archive /backups/logical /backups/physical -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
 > docker compose up -d
 > ```
+>
+> A limpeza de `wal_archive/` é obrigatória ao criar um cluster novo: WALs de
+> clusters diferentes não podem compartilhar o mesmo archive. O comando acima
+> também remove os backups vinculados ao cluster descartado.
 
 ## Como conectar via psql
 
@@ -161,7 +174,7 @@ psql "postgresql://postgres:SUA_SENHA@localhost:5434/appdb"
 - `backup_user` reaproveitado do Lab 02: reforça a continuidade entre labs — a role já nasceu preparada (`LOGIN REPLICATION`) para este cenário.
 - Restore físico e PITR sobem containers `postgres:16` temporários via `docker run`, isolados do serviço principal do `docker-compose.yml`: valida o backup de forma realista (cluster independente) sem arriscar o ambiente principal do lab.
 - Cópia da área de backup (`cp -a`) antes de qualquer restore: preserva o backup original intacto, permitindo repetir a validação quantas vezes for necessário.
-- `archive_command` idempotente (`test ! -f ... && cp`): evita erro do PostgreSQL ao tentar arquivar um WAL cujo destino já existe (cenário comum após reinícios).
+- `archive_command` dedicado: não sobrescreve colisões, aceita reenvios idênticos e publica arquivos por operação atômica.
 - Porta `5434`: evita conflito com os Labs 01 (`5432`) e 02 (`5433`).
 
 ## Observações

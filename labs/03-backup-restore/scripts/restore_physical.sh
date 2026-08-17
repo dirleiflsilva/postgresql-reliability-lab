@@ -13,11 +13,25 @@ PHYSICAL_DIR="${LAB_DIR}/backups/physical"
 ensure_writable_dir "${PHYSICAL_DIR}"
 
 if [[ -z "${TIMESTAMP}" ]]; then
-  TIMESTAMP="$(find "${PHYSICAL_DIR}" -maxdepth 1 -mindepth 1 -type d -not -name '*-verify' -printf '%f\n' | sort -r | head -n1)"
+  LATEST=""
+  for CANDIDATE_DIR in "${PHYSICAL_DIR}"/*; do
+    [[ -d "${CANDIDATE_DIR}" ]] || continue
+    CANDIDATE="${CANDIDATE_DIR##*/}"
+    [[ "${CANDIDATE}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+    if [[ -z "${LATEST}" || "${CANDIDATE}" > "${LATEST}" ]]; then
+      LATEST="${CANDIDATE}"
+    fi
+  done
+  TIMESTAMP="${LATEST}"
   if [[ -z "${TIMESTAMP}" ]]; then
     echo "error: nenhum backup físico encontrado em backups/physical/. Rode backup_physical.sh primeiro."
     exit 1
   fi
+fi
+
+if [[ ! "${TIMESTAMP}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+  echo "error: timestamp inválido: ${TIMESTAMP}. Use o formato YYYYMMDDTHHMMSSZ."
+  exit 1
 fi
 
 SRC_DIR="${PHYSICAL_DIR}/${TIMESTAMP}"
@@ -34,7 +48,11 @@ echo "info: copiando backups/physical/${TIMESTAMP} para uma área de verificaç�
 # container, com permissão 0700 — por isso a cópia roda como root dentro de
 # um container auxiliar, e não diretamente no host.
 docker run --rm --user root -v "${PHYSICAL_DIR}:/physical" postgres:16 \
-  bash -c "rm -rf '/physical/${TIMESTAMP}-verify' && cp -a '/physical/${TIMESTAMP}' '/physical/${TIMESTAMP}-verify'"
+  bash -c '
+    timestamp="$1"
+    rm -rf -- "/physical/${timestamp}-verify"
+    cp -a -- "/physical/${timestamp}" "/physical/${timestamp}-verify"
+  ' bash "${TIMESTAMP}"
 
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 cleanup() {
