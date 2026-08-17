@@ -33,3 +33,4 @@ mv -- "${HOST_PARTIAL_FILE}" "${HOST_DUMP_FILE}"
 trap - EXIT
 
 echo "ok: backup lógico criado em backups/logical/${DUMP_NAME}"
+echo "info: este dump contém apenas ${POSTGRES_DB}; roles e tablespaces são objetos globais e não fazem parte do pg_dump."

@@ -98,5 +98,21 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'índices essenciais ausentes ou inválidos';
     END IF;
+
+    IF (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'app') <> 'app_owner'
+        OR (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'audit') <> 'app_owner'
+        OR (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'seed') <> 'app_owner'
+        OR (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'app.orders'::regclass) <> 'app_owner'
+        OR (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'audit.events'::regclass) <> 'app_owner' THEN
+        RAISE EXCEPTION 'ownership de schemas ou tabelas não foi preservado';
+    END IF;
+
+    IF NOT has_table_privilege('app_user', 'app.orders', 'SELECT')
+        OR NOT has_table_privilege('app_user', 'app.orders', 'INSERT')
+        OR NOT has_table_privilege('readonly', 'app.orders', 'SELECT')
+        OR has_table_privilege('readonly', 'app.orders', 'INSERT')
+        OR NOT has_schema_privilege('readonly', 'app', 'USAGE') THEN
+        RAISE EXCEPTION 'privilégios essenciais não foram preservados';
+    END IF;
 END
 $validation$;

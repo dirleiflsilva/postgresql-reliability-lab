@@ -35,12 +35,31 @@ docker compose -f "${COMPOSE_FILE}" exec -T postgres \
 echo "info: restaurando ${DUMP_FILE#/backups/logical/} em ${RESTORE_DB}..."
 
 docker compose -f "${COMPOSE_FILE}" exec -T postgres \
-  psql -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${RESTORE_DB};" >/dev/null
-docker compose -f "${COMPOSE_FILE}" exec -T postgres \
-  psql -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${RESTORE_DB};" >/dev/null
+  psql -U "${POSTGRES_USER}" -d postgres -X -v ON_ERROR_STOP=1 \
+    -v restore_db="${RESTORE_DB}" <<'SQL' >/dev/null
+DO $roles$
+DECLARE
+  missing_roles text;
+BEGIN
+  SELECT string_agg(required_role, ', ' ORDER BY required_role)
+  INTO missing_roles
+  FROM unnest(ARRAY['app_owner', 'app_user', 'readonly', 'backup_user', 'monitor_user']) AS required_role
+  WHERE NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = required_role
+  );
+
+  IF missing_roles IS NOT NULL THEN
+    RAISE EXCEPTION 'roles globais ausentes: %. Execute init/01_roles.sql antes do restore', missing_roles;
+  END IF;
+END
+$roles$;
+
+SELECT format('DROP DATABASE IF EXISTS %I', :'restore_db') \gexec
+SELECT format('CREATE DATABASE %I TEMPLATE template0', :'restore_db') \gexec
+SQL
 
 docker compose -f "${COMPOSE_FILE}" exec -T postgres \
-  pg_restore -U "${POSTGRES_USER}" -d "${RESTORE_DB}" --no-owner "${DUMP_FILE}"
+  pg_restore -U "${POSTGRES_USER}" -d "${RESTORE_DB}" "${DUMP_FILE}"
 
 echo "info: validando estrutura, conteúdo sentinela e integridade em ${RESTORE_DB}..."
 validate_compose_database "${RESTORE_DB}" >/dev/null

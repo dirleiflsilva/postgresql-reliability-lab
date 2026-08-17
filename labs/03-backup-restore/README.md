@@ -100,8 +100,10 @@ Além do estado base (roles, schemas, extensões, dados e configuração), o scr
 ./scripts/restore_logical.sh
 ```
 
-- `backup_logical.sh` gera `backups/logical/appdb_<timestamp>.dump` com `pg_dump -Fc`; o nome final só é publicado depois que o comando termina com sucesso.
-- `restore_logical.sh` valida o catálogo do dump com `pg_restore --list`, restaura o dump mais recente (ou um arquivo específico passado como argumento) em `appdb_restore` e verifica estrutura, constraints, índices, dados sentinela e consistência dos totais. Contagens e fingerprints do banco atual são mostrados apenas como comparação informativa, pois o banco pode ter avançado desde o snapshot.
+- `backup_logical.sh` gera `backups/logical/appdb_<timestamp>.dump` com `pg_dump -Fc`; o nome final só é publicado depois que o comando termina com sucesso. Por definição, esse dump contém apenas o banco `appdb`: roles e tablespaces são objetos globais do cluster e ficam fora do escopo deste lab.
+- `restore_logical.sh` exige que as roles criadas por `init/01_roles.sql` já existam, valida o catálogo com `pg_restore --list`, cria `appdb_restore` a partir de `template0` e restaura o dump preservando os proprietários originais. Depois verifica ownership, privilégios, estrutura, constraints, índices, dados sentinela e consistência dos totais. Contagens e fingerprints do banco atual são mostrados apenas como comparação informativa, pois o banco pode ter avançado desde o snapshot.
+
+Para migrar o backup para um cluster vazio, as roles devem ser criadas primeiro pelo script de inicialização. Em uma estratégia de backup completo de cluster, os objetos globais seriam protegidos separadamente com `pg_dumpall --globals-only`.
 
 ## Backup e restore físico
 
@@ -178,6 +180,7 @@ psql "postgresql://postgres:SUA_SENHA@localhost:5434/appdb"
 - Cópia da área de backup (`cp -a`) antes de qualquer restore: preserva o backup original intacto, permitindo repetir a validação quantas vezes for necessário.
 - `archive_command` dedicado: não sobrescreve colisões, aceita reenvios idênticos e publica arquivos por operação atômica.
 - Validação compartilhada dos restores: os três cenários usam as mesmas regras de estrutura e integridade; no PITR, o fingerprint anterior ao incidente precisa coincidir exatamente com o cluster recuperado.
+- Restore lógico a partir de `template0`: evita herdar extensões ou customizações locais de `template1`; as roles globais são pré-requisito e o `pg_restore` preserva ownership e ACLs.
 - Porta `5434`: evita conflito com os Labs 01 (`5432`) e 02 (`5433`).
 
 ## Observações
@@ -189,6 +192,7 @@ psql "postgresql://postgres:SUA_SENHA@localhost:5434/appdb"
 ## Referências
 
 - `pg_dump` / `pg_restore`: https://www.postgresql.org/docs/current/app-pgdump.html
+- `pg_dumpall`: https://www.postgresql.org/docs/current/app-pg-dumpall.html
 - `pg_basebackup`: https://www.postgresql.org/docs/current/app-pgbasebackup.html
 - Continuous Archiving and Point-in-Time Recovery (PITR): https://www.postgresql.org/docs/current/continuous-archiving.html
 - Configuração de recuperação (`recovery_target_time`, `restore_command`): https://www.postgresql.org/docs/current/runtime-config-wal.html#RUNTIME-CONFIG-WAL-ARCHIVE-RECOVERY
