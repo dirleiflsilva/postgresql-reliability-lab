@@ -26,7 +26,7 @@ Cada lab adiciona uma nova camada de maturidade sobre os anteriores. A base cria
 |--------|-----|-----------|
 | ✅ | 01 - Foundation | Ambiente PostgreSQL single-node com Docker, volume persistente, healthcheck e inicialização básica |
 | ✅ | 02 - Database Initialization | Roles, schemas, extensões, modelo de dados e carga inicial representativa |
-| ⏳ | 03 - Backup & Restore | Backup lógico, backup físico, restore, WAL archiving e recuperação point-in-time |
+| 🚧 | 03 - Backup & Restore | Backup lógico, backup físico, restore, WAL archiving e recuperação point-in-time |
 | ⏳ | 04 - Replication | Streaming replication com primary e replica |
 | ⏳ | 05 - Failover | Alta disponibilidade e failover automático |
 | ⏳ | 06 - Observability | Monitoramento com métricas, logs e dashboards |
@@ -86,7 +86,8 @@ docker compose up -d
 postgresql-reliability-lab/
 ├── labs/
 │   ├── 01-foundation/
-│   └── 02-database-initialization/
+│   ├── 02-database-initialization/
+│   └── 03-backup-restore/
 ├── scripts/
 ├── datasets/
 └── docs/

@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pgrl-backup-restore-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      [
+        "postgres",
+        "-c",
+        "shared_preload_libraries=pg_stat_statements",
+        "-c",
+        "track_io_timing=on",
+        "-c",
+        "wal_level=replica",
+        "-c",
+        "archive_mode=on",
+        "-c",
+        "archive_command=test ! -f /var/lib/postgresql/wal_archive/%f && cp %p /var/lib/postgresql/wal_archive/%f",
+      ]
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_backup_restore_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./wal_archive:/var/lib/postgresql/wal_archive
+      - ./backups:/backups
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1 -p 5432",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  postgres_backup_restore_data:
