@@ -85,19 +85,11 @@ if [[ "${READY}" -ne 1 ]]; then
 fi
 
 echo "info: validando dados no cluster restaurado (porta ${VERIFY_PHYSICAL_PORT})..."
-docker exec "${CONTAINER_NAME}" psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
-DO $$
-BEGIN
-  IF (SELECT count(*) FROM app.customers) < 100 THEN
-    RAISE EXCEPTION 'customers abaixo do esperado no backup físico restaurado';
-  END IF;
+validate_container_database "${CONTAINER_NAME}" "${POSTGRES_DB}" >/dev/null
+RESTORED_FINGERPRINT="$(fingerprint_container_database "${CONTAINER_NAME}" "${POSTGRES_DB}")"
 
-  IF (SELECT count(*) FROM app.orders) < 500 THEN
-    RAISE EXCEPTION 'orders abaixo do esperado no backup físico restaurado';
-  END IF;
-END
-$$;
-SQL
+echo "ok: estrutura, constraints, índices, sentinelas e totais internos validados."
+echo "info: fingerprint dos pedidos restaurados: ${RESTORED_FINGERPRINT}"
 
 echo "ok: backup físico backups/physical/${TIMESTAMP} restaurado e validado com sucesso."
 echo "info: container temporário será removido automaticamente ao final deste script."

@@ -27,7 +27,9 @@ labs/03-backup-restore/
 │   ├── restore_logical.sh      # pg_restore em banco separado + comparação de linhas
 │   ├── backup_physical.sh      # pg_basebackup via backup_user
 │   ├── restore_physical.sh     # sobe um container temporário a partir do backup físico
-│   └── pitr_demo.sh            # roteiro completo de incidente + PITR
+│   ├── pitr_demo.sh            # roteiro completo de incidente + PITR
+│   ├── validate_restored_db.sql # valida estrutura, sentinelas e integridade interna
+│   └── orders_fingerprint.sql   # fingerprint determinístico de pedidos, itens e pagamentos
 ├── backups/
 │   ├── logical/                 # dumps gerados por backup_logical.sh (ignorado no git)
 │   └── physical/                # base backups gerados por backup_physical.sh (ignorado no git)
@@ -86,10 +88,10 @@ chmod +x scripts/*.sh
 O resultado esperado é:
 
 ```text
-ok: backup & restore validado (roles, schemas, extensões, dados e WAL archiving).
+ok: backup & restore validado (roles, schemas, extensões, dados e arquivamento real de WAL).
 ```
 
-Esse script valida apenas o estado base do ambiente (roles, schemas, extensões, dados e configuração de WAL). Os cenários de backup, restore e PITR são exercitados manualmente pelos scripts abaixo.
+Além do estado base (roles, schemas, extensões, dados e configuração), o script força um `pg_switch_wal()`, aguarda o incremento de `pg_stat_archiver` e confirma que o segmento apareceu em `wal_archive/`. Por isso, cada execução gera um pequeno volume adicional de WAL. Os cenários de backup, restore e PITR continuam sendo exercitados pelos scripts abaixo.
 
 ## Backup e restore lógico
 
@@ -99,7 +101,7 @@ Esse script valida apenas o estado base do ambiente (roles, schemas, extensões,
 ```
 
 - `backup_logical.sh` gera `backups/logical/appdb_<timestamp>.dump` com `pg_dump -Fc`; o nome final só é publicado depois que o comando termina com sucesso.
-- `restore_logical.sh` restaura o dump mais recente (ou um arquivo específico passado como argumento) em um banco `appdb_restore`, e compara a contagem de linhas de cada tabela contra o banco de origem.
+- `restore_logical.sh` valida o catálogo do dump com `pg_restore --list`, restaura o dump mais recente (ou um arquivo específico passado como argumento) em `appdb_restore` e verifica estrutura, constraints, índices, dados sentinela e consistência dos totais. Contagens e fingerprints do banco atual são mostrados apenas como comparação informativa, pois o banco pode ter avançado desde o snapshot.
 
 ## Backup e restore físico
 
@@ -109,7 +111,7 @@ Esse script valida apenas o estado base do ambiente (roles, schemas, extensões,
 ```
 
 - `backup_physical.sh` usa `pg_basebackup` autenticado como `backup_user` (role criada em `init/01_roles.sql` com o atributo `REPLICATION`) e grava o resultado em `backups/physical/<timestamp>/`. Durante a execução, o diretório usa o sufixo `.partial` e só recebe o nome final após sucesso.
-- `restore_physical.sh` copia o backup físico mais recente (ou um timestamp específico passado como argumento) para uma área isolada, sobe um container Postgres temporário a partir dela na porta `VERIFY_PHYSICAL_PORT` (padrão `5435`) e valida que os dados batem com o esperado. O container temporário é removido automaticamente ao final.
+- `restore_physical.sh` copia o backup físico mais recente (ou um timestamp específico passado como argumento) para uma área isolada, sobe um container Postgres temporário na porta `VERIFY_PHYSICAL_PORT` (padrão `5435`) e valida estrutura, constraints, índices, sentinelas, totais internos e fingerprint dos pedidos. O container temporário é removido automaticamente ao final.
 
 ## WAL archiving e PITR
 
@@ -138,7 +140,7 @@ Esse script automatiza o cenário completo:
 4. **Simula um incidente**: apaga, em uma única transação, os dados de `app.payments`, `app.order_items` e `app.orders` no ambiente principal do lab, força um `pg_switch_wal()` e aguarda o `pg_stat_archiver` confirmar o arquivamento do WAL do incidente.
 5. Copia o backup de base para uma área isolada, configura `recovery_target_time` com o timestamp do passo 3 e `restore_command` apontando para `wal_archive/`.
 6. Sobe um container temporário na porta `VERIFY_PITR_PORT` (padrão `5436`), aguarda o replay de WAL e a promoção do cluster restaurado.
-7. Compara a contagem de `app.orders` antes do incidente, depois do incidente (no ambiente principal, que permanece com os dados apagados) e no cluster restaurado via PITR.
+7. Compara a contagem e o fingerprint de pedidos, itens e pagamentos com o estado anterior ao incidente e também valida sentinelas, constraints, índices e totais internos no cluster recuperado.
 
 > **Atenção:** este script apaga dados reais do ambiente principal do lab para simular o incidente — isso
 > é intencional, faz parte da demonstração.
@@ -175,6 +177,7 @@ psql "postgresql://postgres:SUA_SENHA@localhost:5434/appdb"
 - Restore físico e PITR sobem containers `postgres:16` temporários via `docker run`, isolados do serviço principal do `docker-compose.yml`: valida o backup de forma realista (cluster independente) sem arriscar o ambiente principal do lab.
 - Cópia da área de backup (`cp -a`) antes de qualquer restore: preserva o backup original intacto, permitindo repetir a validação quantas vezes for necessário.
 - `archive_command` dedicado: não sobrescreve colisões, aceita reenvios idênticos e publica arquivos por operação atômica.
+- Validação compartilhada dos restores: os três cenários usam as mesmas regras de estrutura e integridade; no PITR, o fingerprint anterior ao incidente precisa coincidir exatamente com o cluster recuperado.
 - Porta `5434`: evita conflito com os Labs 01 (`5432`) e 02 (`5433`).
 
 ## Observações

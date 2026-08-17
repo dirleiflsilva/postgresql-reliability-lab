@@ -53,6 +53,7 @@ mv -- "${HOST_BASE_PARTIAL_DIR}" "${HOST_BASE_DIR}"
 
 BASELINE_COUNT="$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
   psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -t -A -c "SELECT count(*) FROM app.orders;")"
+BASELINE_FINGERPRINT="$(fingerprint_compose_database "${POSTGRES_DB}")"
 echo "info: app.orders antes do incidente: ${BASELINE_COUNT} linhas"
 
 sleep 2
@@ -172,6 +173,8 @@ fi
 
 RESTORED_COUNT="$(docker exec "${CONTAINER_NAME}" \
   psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -t -A -c "SELECT count(*) FROM app.orders;")"
+validate_container_database "${CONTAINER_NAME}" "${POSTGRES_DB}" >/dev/null
+RESTORED_FINGERPRINT="$(fingerprint_container_database "${CONTAINER_NAME}" "${POSTGRES_DB}")"
 
 echo "info: 5/5 - resultado da recuperação (porta ${VERIFY_PITR_PORT}):"
 echo "  app.orders antes do incidente ......... ${BASELINE_COUNT}"
@@ -183,6 +186,13 @@ if [[ "${RESTORED_COUNT}" != "${BASELINE_COUNT}" ]]; then
   exit 1
 fi
 
-echo "ok: PITR validado — dados restaurados para o instante anterior ao incidente."
+if [[ "${RESTORED_FINGERPRINT}" != "${BASELINE_FINGERPRINT}" ]]; then
+  echo "error: PITR restaurou a contagem, mas o conteúdo dos pedidos diverge do estado anterior ao incidente."
+  echo "info: fingerprint anterior=${BASELINE_FINGERPRINT}"
+  echo "info: fingerprint restaurado=${RESTORED_FINGERPRINT}"
+  exit 1
+fi
+
+echo "ok: PITR validado — contagem, fingerprint, sentinelas, constraints, índices e totais internos conferem."
 echo "info: container temporário será removido automaticamente ao final deste script."
 echo "info: para repor o ambiente principal, siga o procedimento completo de reset descrito no README."

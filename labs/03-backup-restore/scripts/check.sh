@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Valida o estado base do ambiente (roles, schemas, extensões, dados e
-# configuração de WAL archiving). Não exercita backup/restore/PITR — isso é
-# feito pelos scripts backup_logical.sh, restore_logical.sh, backup_physical.sh,
-# restore_physical.sh e pitr_demo.sh.
+# Valida o estado base do ambiente e força um WAL switch para comprovar que o
+# archive_command publica o segmento. Não exercita backup/restore/PITR — isso é
+# feito pelos demais scripts do lab.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 require_running_postgres
+
+WAL_ARCHIVE_DIR="${LAB_DIR}/wal_archive"
+ensure_writable_dir "${WAL_ARCHIVE_DIR}"
 
 if ! docker compose -f "${COMPOSE_FILE}" exec -T postgres \
   pg_isready -h 127.0.0.1 -p 5432 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null; then
@@ -44,7 +46,7 @@ BEGIN
   END IF;
 
   IF (SELECT count(*) FROM app.orders) < 1 THEN
-    RAISE EXCEPTION 'orders abaixo do esperado (rode "docker compose down -v && up -d" se já executou o pitr_demo.sh)';
+    RAISE EXCEPTION 'orders abaixo do esperado (siga o reset completo do README se já executou o pitr_demo.sh)';
   END IF;
 
   IF current_setting('archive_mode') <> 'on' THEN
@@ -54,8 +56,59 @@ BEGIN
   IF current_setting('wal_level') <> 'replica' THEN
     RAISE EXCEPTION 'wal_level não está configurado como replica';
   END IF;
+
+  IF current_setting('archive_command') <> '/usr/local/bin/archive_wal %p %f' THEN
+    RAISE EXCEPTION 'archive_command não aponta para o helper esperado';
+  END IF;
 END
 $$;
 SQL
 
-echo "ok: backup & restore validado (roles, schemas, extensões, dados e WAL archiving)."
+if ! docker compose -f "${COMPOSE_FILE}" exec -T --user postgres postgres \
+  test -w /var/lib/postgresql/wal_archive; then
+  echo "error: diretório de WAL archive não está gravável pelo usuário postgres."
+  exit 1
+fi
+
+IFS='|' read -r CHECK_WAL ARCHIVED_BEFORE FAILED_BEFORE <<<"$(
+  docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+    psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -X -t -A -F '|' -c \
+      "SELECT pg_walfile_name(pg_current_wal_lsn()), archived_count, failed_count FROM pg_stat_archiver;"
+)"
+
+docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+  psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -X -t -A \
+    -c "SELECT pg_switch_wal();" >/dev/null
+
+ARCHIVED_NOW="${ARCHIVED_BEFORE}"
+FAILED_NOW="${FAILED_BEFORE}"
+WAL_ARCHIVED=0
+for _ in $(seq 1 30); do
+  IFS='|' read -r ARCHIVED_NOW FAILED_NOW <<<"$(
+    docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+      psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -X -t -A -F '|' -c \
+        "SELECT archived_count, failed_count FROM pg_stat_archiver;"
+  )"
+
+  if (( ARCHIVED_NOW > ARCHIVED_BEFORE )) \
+    && [[ -f "${WAL_ARCHIVE_DIR}/${CHECK_WAL}" ]]; then
+    WAL_ARCHIVED=1
+    break
+  fi
+
+  sleep 1
+done
+
+if [[ "${WAL_ARCHIVED}" -ne 1 ]]; then
+  echo "error: WAL ${CHECK_WAL} não foi confirmado no archive a tempo."
+  echo "info: pg_stat_archiver antes: archived=${ARCHIVED_BEFORE}, failed=${FAILED_BEFORE}"
+  echo "info: pg_stat_archiver agora: archived=${ARCHIVED_NOW}, failed=${FAILED_NOW}"
+  exit 1
+fi
+
+if (( FAILED_NOW > FAILED_BEFORE )); then
+  echo "error: o archiver registrou nova falha durante a validação."
+  exit 1
+fi
+
+echo "ok: backup & restore validado (roles, schemas, extensões, dados e arquivamento real de WAL)."

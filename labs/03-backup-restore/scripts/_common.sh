@@ -35,3 +35,33 @@ ensure_writable_dir() {
   mkdir -p "$1"
   chmod 777 "$1"
 }
+
+validate_compose_database() {
+  local database="$1"
+  docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+    psql -U "${POSTGRES_USER}" -d "${database}" -X -v ON_ERROR_STOP=1 \
+    <"${SCRIPT_DIR}/validate_restored_db.sql"
+}
+
+validate_container_database() {
+  local container="$1"
+  local database="$2"
+  docker exec -i "${container}" \
+    psql -U "${POSTGRES_USER}" -d "${database}" -X -v ON_ERROR_STOP=1 \
+    <"${SCRIPT_DIR}/validate_restored_db.sql"
+}
+
+fingerprint_compose_database() {
+  local database="$1"
+  docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+    psql -U "${POSTGRES_USER}" -d "${database}" -X -t -A -v ON_ERROR_STOP=1 \
+    <"${SCRIPT_DIR}/orders_fingerprint.sql"
+}
+
+fingerprint_container_database() {
+  local container="$1"
+  local database="$2"
+  docker exec -i "${container}" \
+    psql -U "${POSTGRES_USER}" -d "${database}" -X -t -A -v ON_ERROR_STOP=1 \
+    <"${SCRIPT_DIR}/orders_fingerprint.sql"
+}

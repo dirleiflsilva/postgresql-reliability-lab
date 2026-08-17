@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restaura o dump lógico mais recente (ou o informado como argumento) em um
-# banco separado (${POSTGRES_DB}_restore) e compara a contagem de linhas por
-# tabela contra o banco de origem.
+# banco separado (${POSTGRES_DB}_restore), valida estrutura e integridade e
+# apresenta apenas uma comparação informativa com o banco atual.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +28,10 @@ else
   DUMP_FILE="/backups/logical/${LATEST}"
 fi
 
+echo "info: validando catálogo do dump ${DUMP_FILE#/backups/logical/}..."
+docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+  pg_restore --list "${DUMP_FILE}" >/dev/null
+
 echo "info: restaurando ${DUMP_FILE#/backups/logical/} em ${RESTORE_DB}..."
 
 docker compose -f "${COMPOSE_FILE}" exec -T postgres \
@@ -38,10 +42,12 @@ docker compose -f "${COMPOSE_FILE}" exec -T postgres \
 docker compose -f "${COMPOSE_FILE}" exec -T postgres \
   pg_restore -U "${POSTGRES_USER}" -d "${RESTORE_DB}" --no-owner "${DUMP_FILE}"
 
-echo "info: comparando contagem de linhas entre ${POSTGRES_DB} e ${RESTORE_DB}..."
+echo "info: validando estrutura, conteúdo sentinela e integridade em ${RESTORE_DB}..."
+validate_compose_database "${RESTORE_DB}" >/dev/null
+
+echo "info: comparação informativa entre o banco atual e o snapshot restaurado:"
 
 TABLES=(app.customers app.addresses app.categories app.products app.orders app.order_items app.payments audit.events)
-MISMATCH=0
 
 for TABLE in "${TABLES[@]}"; do
   ORIGINAL_COUNT="$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
@@ -50,16 +56,21 @@ for TABLE in "${TABLES[@]}"; do
     psql -U "${POSTGRES_USER}" -d "${RESTORE_DB}" -t -A -c "SELECT count(*) FROM ${TABLE};")"
 
   if [[ "${ORIGINAL_COUNT}" != "${RESTORED_COUNT}" ]]; then
-    echo "error: divergência em ${TABLE}: origem=${ORIGINAL_COUNT} restaurado=${RESTORED_COUNT}"
-    MISMATCH=1
+    echo "info: ${TABLE}: atual=${ORIGINAL_COUNT}, snapshot=${RESTORED_COUNT} (estados diferentes)"
   else
     echo "ok: ${TABLE} (${RESTORED_COUNT} linhas)"
   fi
 done
 
-if [[ "${MISMATCH}" -ne 0 ]]; then
-  echo "error: restore lógico divergente do banco de origem."
-  exit 1
+CURRENT_FINGERPRINT="$(fingerprint_compose_database "${POSTGRES_DB}")"
+RESTORED_FINGERPRINT="$(fingerprint_compose_database "${RESTORE_DB}")"
+
+if [[ "${CURRENT_FINGERPRINT}" == "${RESTORED_FINGERPRINT}" ]]; then
+  echo "ok: fingerprint de pedidos coincide com o banco atual (${RESTORED_FINGERPRINT})."
+else
+  echo "info: fingerprint atual=${CURRENT_FINGERPRINT:-<vazio>}"
+  echo "info: fingerprint do snapshot=${RESTORED_FINGERPRINT:-<vazio>}"
+  echo "info: a diferença é informativa e não invalida o restore de um snapshot anterior."
 fi
 
-echo "ok: restore lógico validado em ${RESTORE_DB}, todas as tabelas batem com ${POSTGRES_DB}."
+echo "ok: restore lógico validado em ${RESTORE_DB} pelo catálogo do dump, estrutura e integridade dos dados."
