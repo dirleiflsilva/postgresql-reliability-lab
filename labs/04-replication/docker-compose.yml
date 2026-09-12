@@ -1,0 +1,71 @@
+name: pgrl-lab04
+
+x-postgres-command: &postgres-command
+  - postgres
+  - -c
+  - shared_preload_libraries=pg_stat_statements
+  - -c
+  - track_io_timing=on
+  - -c
+  - wal_level=replica
+  - -c
+  - max_wal_senders=5
+  - -c
+  - max_replication_slots=5
+  - -c
+  - max_slot_wal_keep_size=1GB
+  - -c
+  - hot_standby=on
+
+services:
+  primary:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      BACKUP_USER_PASSWORD: ${BACKUP_USER_PASSWORD:?Defina BACKUP_USER_PASSWORD}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Defina REPLICATION_PASSWORD}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    command: *postgres-command
+    ports:
+      - "127.0.0.1:${PRIMARY_PORT:-5437}:5432"
+    volumes:
+      - primary_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  replica:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on:
+      primary:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Defina REPLICATION_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    entrypoint: [bash, /usr/local/bin/start-replica.sh]
+    command: *postgres-command
+    ports:
+      - "127.0.0.1:${REPLICA_PORT:-5438}:5432"
+    volumes:
+      - replica_data:/var/lib/postgresql/data
+      - ./scripts/start-replica.sh:/usr/local/bin/start-replica.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Atqc "SELECT pg_is_in_recovery()" | grep -qx t']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  primary_data:
+  replica_data:
