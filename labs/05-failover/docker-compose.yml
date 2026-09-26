@@ -1,0 +1,129 @@
+name: pgrl-lab05
+
+x-pg: &pg
+  build: .
+  image: pgrl-lab05-patroni:local
+  restart: "no"
+  environment: &pg-env
+    PATRONI_SUPERUSER_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+    PATRONI_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Defina REPLICATION_PASSWORD}
+    BACKUP_USER_PASSWORD: ${BACKUP_USER_PASSWORD:?Defina BACKUP_USER_PASSWORD}
+  depends_on:
+    etcd1: {condition: service_healthy}
+    etcd2: {condition: service_healthy}
+    etcd3: {condition: service_healthy}
+  healthcheck:
+    test: [CMD, curl, -fsS, --max-time, '2', 'http://localhost:8008/health']
+    interval: 3s
+    timeout: 3s
+    retries: 60
+    start_period: 20s
+
+services:
+  etcd1:
+    image: quay.io/coreos/etcd:v3.5.21
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-token=lab05-etcd
+      - --initial-cluster-state=new
+    volumes: [etcd1_data:/etcd-data]
+    healthcheck:
+      test: [CMD, /usr/local/bin/etcdctl, --endpoints=http://localhost:2379, endpoint, health]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  etcd2:
+    image: quay.io/coreos/etcd:v3.5.21
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-token=lab05-etcd
+      - --initial-cluster-state=new
+    volumes: [etcd2_data:/etcd-data]
+    healthcheck:
+      test: [CMD, /usr/local/bin/etcdctl, --endpoints=http://localhost:2379, endpoint, health]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  etcd3:
+    image: quay.io/coreos/etcd:v3.5.21
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-token=lab05-etcd
+      - --initial-cluster-state=new
+    volumes: [etcd3_data:/etcd-data]
+    healthcheck:
+      test: [CMD, /usr/local/bin/etcdctl, --endpoints=http://localhost:2379, endpoint, health]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  pg1:
+    <<: *pg
+    hostname: pg1
+    environment:
+      <<: *pg-env
+      PATRONI_NAME: pg1
+      PATRONI_RESTAPI_CONNECT_ADDRESS: pg1:8008
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: pg1:5432
+    volumes: [pg1_data:/var/lib/postgresql/data]
+
+  pg2:
+    <<: *pg
+    hostname: pg2
+    environment:
+      <<: *pg-env
+      PATRONI_NAME: pg2
+      PATRONI_RESTAPI_CONNECT_ADDRESS: pg2:8008
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: pg2:5432
+    volumes: [pg2_data:/var/lib/postgresql/data]
+
+  haproxy:
+    image: haproxy:3.0-alpine
+    ports: ["127.0.0.1:${WRITE_PORT:-5439}:5432"]
+    volumes: [./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro]
+    depends_on:
+      pg1: {condition: service_healthy}
+      pg2: {condition: service_healthy}
+
+  client:
+    pull_policy: never
+    image: pgrl-lab05-patroni:local
+    entrypoint: [sleep, infinity]
+    environment:
+      PGHOST: haproxy
+      PGUSER: postgres
+      PGDATABASE: appdb
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      PGCONNECT_TIMEOUT: '2'
+      PGOPTIONS: '-c statement_timeout=5000'
+    depends_on: [haproxy]
+
+volumes:
+  pg1_data:
+  pg2_data:
+  etcd1_data:
+  etcd2_data:
+  etcd3_data:

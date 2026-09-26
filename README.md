@@ -28,7 +28,7 @@ Cada lab adiciona uma nova camada de maturidade sobre os anteriores. A base cria
 | ✅ | 02 - Database Initialization | Roles, schemas, extensões, modelo de dados e carga inicial representativa |
 | ✅ | 03 - Backup & Restore | Backup lógico, backup físico, restore, WAL archiving e recuperação point-in-time |
 | ✅ | 04 - Replication | Streaming replication com primary e replica |
-| ⏳ | 05 - Failover | Alta disponibilidade e failover automático |
+| ✅ | [05 - Failover](labs/05-failover/README.md) | Patroni, etcd, HAProxy e failover automático |
 | ⏳ | 06 - Observability | Monitoramento com métricas, logs e dashboards |
 | ⏳ | 07 - Performance | Análise de queries, índices e otimização |
 | ⏳ | 08 - Data Pipeline | Ingestão e processamento de dados |
@@ -88,7 +88,8 @@ postgresql-reliability-lab/
 │   ├── 01-foundation/
 │   ├── 02-database-initialization/
 │   ├── 03-backup-restore/
-│   └── 04-replication/
+│   ├── 04-replication/
+│   └── 05-failover/
 ├── scripts/
 ├── datasets/
 └── docs/
