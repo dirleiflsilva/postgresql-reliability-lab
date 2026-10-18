@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: PostgreSQL Reliability Lab
+    orgId: 1
+    folder: PostgreSQL Reliability Lab
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards

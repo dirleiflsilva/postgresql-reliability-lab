@@ -24,12 +24,12 @@ Cada lab adiciona uma nova camada de maturidade sobre os anteriores. A base cria
 
 | Status | Lab | Descrição |
 |--------|-----|-----------|
-| ✅ | 01 - Foundation | Ambiente PostgreSQL single-node com Docker, volume persistente, healthcheck e inicialização básica |
-| ✅ | 02 - Database Initialization | Roles, schemas, extensões, modelo de dados e carga inicial representativa |
-| ✅ | 03 - Backup & Restore | Backup lógico, backup físico, restore, WAL archiving e recuperação point-in-time |
-| ✅ | 04 - Replication | Streaming replication com primary e replica |
+| ✅ | [01 - Foundation](labs/01-foundation/README.md) | Ambiente PostgreSQL single-node com Docker, volume persistente, healthcheck e inicialização básica |
+| ✅ | [02 - Database Initialization](labs/02-database-initialization/README.md) | Roles, schemas, extensões, modelo de dados e carga inicial representativa |
+| ✅ | [03 - Backup & Restore](labs/03-backup-restore/README.md) | Backup lógico, backup físico, restore, WAL archiving e recuperação point-in-time |
+| ✅ | [04 - Replication](labs/04-replication/README.md) | Streaming replication com primary e replica |
 | ✅ | [05 - Failover](labs/05-failover/README.md) | Patroni, etcd, HAProxy e failover automático |
-| ⏳ | 06 - Observability | Monitoramento com métricas, logs e dashboards |
+| ✅ | [06 - Observability](labs/06-observability/README.md) | Prometheus, Grafana e Loki para métricas, logs, dashboards e alertas |
 | ⏳ | 07 - Performance | Análise de queries, índices e otimização |
 | ⏳ | 08 - Data Pipeline | Ingestão e processamento de dados |
 
@@ -89,7 +89,8 @@ postgresql-reliability-lab/
 │   ├── 02-database-initialization/
 │   ├── 03-backup-restore/
 │   ├── 04-replication/
-│   └── 05-failover/
+│   ├── 05-failover/
+│   └── 06-observability/
 ├── scripts/
 ├── datasets/
 └── docs/
