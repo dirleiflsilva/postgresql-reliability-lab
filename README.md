@@ -30,7 +30,7 @@ Cada lab adiciona uma nova camada de maturidade sobre os anteriores. A base cria
 | ✅ | [04 - Replication](labs/04-replication/README.md) | Streaming replication com primary e replica |
 | ✅ | [05 - Failover](labs/05-failover/README.md) | Patroni, etcd, HAProxy e failover automático |
 | ✅ | [06 - Observability](labs/06-observability/README.md) | Prometheus, Grafana e Loki para métricas, logs, dashboards e alertas |
-| ⏳ | 07 - Performance | Análise de queries, índices e otimização |
+| ✅ | [07 - Performance](labs/07-performance/README.md) | Análise de queries, índices e otimização com benchmarks e evidências |
 | ⏳ | 08 - Data Pipeline | Ingestão e processamento de dados |
 
 **Legenda:**
@@ -90,7 +90,8 @@ postgresql-reliability-lab/
 │   ├── 03-backup-restore/
 │   ├── 04-replication/
 │   ├── 05-failover/
-│   └── 06-observability/
+│   ├── 06-observability/
+│   └── 07-performance/
 ├── scripts/
 ├── datasets/
 └── docs/

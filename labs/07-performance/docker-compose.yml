@@ -1,0 +1,155 @@
+name: pgrl-lab07
+
+x-pg: &pg
+  build: .
+  image: pgrl-lab07-patroni:local
+  restart: "no"
+  environment: &pg-env
+    PATRONI_SUPERUSER_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+    PATRONI_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Defina REPLICATION_PASSWORD}
+    APP_PASSWORD: ${APP_PASSWORD:?Defina APP_PASSWORD}
+    READONLY_PASSWORD: ${READONLY_PASSWORD:?Defina READONLY_PASSWORD}
+    MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Defina MONITOR_PASSWORD}
+  depends_on:
+    etcd1: {condition: service_healthy}
+    etcd2: {condition: service_healthy}
+    etcd3: {condition: service_healthy}
+  healthcheck:
+    test: [CMD, curl, -fsS, --max-time, '2', 'http://localhost:8008/health']
+    interval: 3s
+    timeout: 3s
+    retries: 60
+    start_period: 20s
+
+x-etcd: &etcd
+  image: quay.io/coreos/etcd:v3.5.21
+  healthcheck:
+    test: [CMD, /usr/local/bin/etcdctl, --endpoints=http://localhost:2379, endpoint, health]
+    interval: 3s
+    timeout: 3s
+    retries: 30
+
+services:
+  etcd1:
+    <<: *etcd
+    command: [/usr/local/bin/etcd, --name=etcd1, --data-dir=/etcd-data, --listen-client-urls=http://0.0.0.0:2379, --advertise-client-urls=http://etcd1:2379, --listen-peer-urls=http://0.0.0.0:2380, --initial-advertise-peer-urls=http://etcd1:2380, '--initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380', --initial-cluster-token=lab07-etcd, --initial-cluster-state=new]
+    volumes: [etcd1_data:/etcd-data]
+  etcd2:
+    <<: *etcd
+    command: [/usr/local/bin/etcd, --name=etcd2, --data-dir=/etcd-data, --listen-client-urls=http://0.0.0.0:2379, --advertise-client-urls=http://etcd2:2379, --listen-peer-urls=http://0.0.0.0:2380, --initial-advertise-peer-urls=http://etcd2:2380, '--initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380', --initial-cluster-token=lab07-etcd, --initial-cluster-state=new]
+    volumes: [etcd2_data:/etcd-data]
+  etcd3:
+    <<: *etcd
+    command: [/usr/local/bin/etcd, --name=etcd3, --data-dir=/etcd-data, --listen-client-urls=http://0.0.0.0:2379, --advertise-client-urls=http://etcd3:2379, --listen-peer-urls=http://0.0.0.0:2380, --initial-advertise-peer-urls=http://etcd3:2380, '--initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380', --initial-cluster-token=lab07-etcd, --initial-cluster-state=new]
+    volumes: [etcd3_data:/etcd-data]
+
+  pg1:
+    <<: *pg
+    hostname: pg1
+    environment:
+      <<: *pg-env
+      PATRONI_NAME: pg1
+      PATRONI_RESTAPI_CONNECT_ADDRESS: pg1:8008
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: pg1:5432
+    volumes: [pg1_data:/var/lib/postgresql/data, pg1_logs:/var/log/postgresql]
+  pg2:
+    <<: *pg
+    hostname: pg2
+    environment:
+      <<: *pg-env
+      PATRONI_NAME: pg2
+      PATRONI_RESTAPI_CONNECT_ADDRESS: pg2:8008
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: pg2:5432
+    volumes: [pg2_data:/var/lib/postgresql/data, pg2_logs:/var/log/postgresql]
+
+  haproxy:
+    image: haproxy:3.0-alpine
+    ports: ["127.0.0.1:${WRITE_PORT:-5441}:5432"]
+    volumes: [./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro]
+    depends_on:
+      pg1: {condition: service_healthy}
+      pg2: {condition: service_healthy}
+
+  client:
+    pull_policy: never
+    image: pgrl-lab07-patroni:local
+    entrypoint: [sleep, infinity]
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?Defina APP_PASSWORD}
+      PGHOST: haproxy
+      PGUSER: postgres
+      PGDATABASE: appdb
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Defina GRAFANA_ADMIN_PASSWORD}
+      PGCONNECT_TIMEOUT: '2'
+      PGOPTIONS: '-c statement_timeout=5000'
+    volumes: [./:/lab07:ro, ./evidence/runs:/evidence]
+    depends_on: [haproxy]
+
+  postgres-exporter-pg1:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://monitor_user:${MONITOR_PASSWORD:?Defina MONITOR_PASSWORD}@pg1:5432/appdb?sslmode=disable
+    depends_on:
+      pg1: {condition: service_healthy}
+  postgres-exporter-pg2:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://monitor_user:${MONITOR_PASSWORD:?Defina MONITOR_PASSWORD}@pg2:5432/appdb?sslmode=disable
+    depends_on:
+      pg2: {condition: service_healthy}
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus, --web.enable-lifecycle]
+    ports: ["127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on: [postgres-exporter-pg1, postgres-exporter-pg2]
+
+  loki:
+    image: grafana/loki:3.3.2
+    command: [-config.file=/etc/loki/local-config.yaml]
+    ports: ["127.0.0.1:${LOKI_PORT:-3100}:3100"]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    user: "0:0"
+    command: [-config.file=/etc/promtail/config.yml]
+    volumes:
+      - ./observability/promtail.yml:/etc/promtail/config.yml:ro
+      - pg1_logs:/var/log/postgresql/pg1:ro
+      - pg2_logs:/var/log/postgresql/pg2:ro
+      - promtail_positions:/run/promtail
+    depends_on: [loki, pg1, pg2]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Defina GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on: [prometheus, loki]
+
+volumes:
+  pg1_data:
+  pg2_data:
+  pg1_logs:
+  pg2_logs:
+  etcd1_data:
+  etcd2_data:
+  etcd3_data:
+  prometheus_data:
+  loki_data:
+  promtail_positions:
+  grafana_data:
