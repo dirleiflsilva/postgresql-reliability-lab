@@ -108,7 +108,7 @@ Cada execução cria `evidence/runs/<UTC>_<tipo>/`, ignorado pelo Git. Os arquiv
 - `manifest.json` e `validation.json` da geração.
 - `metadata.json`, ambiente, imagens Docker e recursos do benchmark.
 - Consultas executadas, hashes de resultado e planos JSON completos.
-- Snapshots de `pg_stat_statements` e deltas por janela; mudanças de reset/evicção ou contadores decrescentes invalidam o delta.
+- Snapshots de `pg_stat_statements` e deltas por janela; reinicialização das estatísticas, remoção de registros por falta de espaço ou contadores decrescentes invalidam o delta.
 - Saída e logs por transação do `pgbench`, com amostras de latência.
 - `results.json` e `report.md`, com mediana, p95 por nearest-rank, desvio padrão, buffers e throughput.
 - `failure.json` em falhas capturadas. A ausência de `finished_utc` no benchmark identifica execução incompleta; os artefatos são preservados.
